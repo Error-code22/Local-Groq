@@ -30,25 +30,99 @@ if (!API_KEY) {
 
 const rl = readline.createInterface({ input, output });
 
+const AVAILABLE_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'mixtral-8x7b-32768',
+  'gemma2-9b-it'
+];
+
+let currentModel = AVAILABLE_MODELS[0];
+
 const messages = [
   { role: 'system', content: 'You are a helpful assistant running in a local CLI.' }
 ];
 
 console.log('\x1b[32m--- Groq CLI Terminal Started ---\x1b[0m');
-console.log('Type "exit" or "quit" to end the session.');
+console.log('Type \x1b[35m/\x1b[0m for commands, or "exit" to end.');
 
 async function chat() {
   while (true) {
-    const userInput = await rl.question('\x1b[36mYou: \x1b[0m');
+    const userInput = await rl.question(`\x1b[34m[${currentModel}]\x1b[0m \x1b[36mYou: \x1b[0m`);
+    const trimmedInput = userInput.trim();
 
-    if (['exit', 'quit'].includes(userInput.toLowerCase().trim())) {
+    if (['exit', 'quit'].includes(trimmedInput.toLowerCase())) {
       console.log('\x1b[32mGoodbye!\x1b[0m');
       break;
     }
 
-    if (!userInput.trim()) continue;
+    if (!trimmedInput) continue;
 
-    messages.push({ role: 'user', content: userInput });
+    // Command Handling
+    if (trimmedInput.startsWith('/')) {
+      const [cmd, ...args] = trimmedInput.slice(1).split(' ');
+      
+      if (cmd === 'model') {
+        if (args.length === 0) {
+          console.log('\n\x1b[35mAvailable Models:\x1b[0m');
+          AVAILABLE_MODELS.forEach((m, i) => {
+            console.log(`${i + 1}. ${m} ${m === currentModel ? '\x1b[32m(current)\x1b[0m' : ''}`);
+          });
+          console.log('To switch, type: /model <number or name>\n');
+        } else {
+          const selection = args[0];
+          const index = parseInt(selection) - 1;
+          if (!isNaN(index) && AVAILABLE_MODELS[index]) {
+            currentModel = AVAILABLE_MODELS[index];
+            console.log(`\x1b[32mSwitched to: ${currentModel}\x1b[0m\n`);
+          } else if (AVAILABLE_MODELS.includes(selection)) {
+            currentModel = selection;
+            console.log(`\x1b[32mSwitched to: ${currentModel}\x1b[0m\n`);
+          } else {
+            console.log('\x1b[31mInvalid model selection.\x1b[0m\n');
+          }
+        }
+        continue;
+      } else if (cmd === 'system') {
+        if (args.length === 0) {
+          console.log(`\n\x1b[35mCurrent System Prompt:\x1b[0m ${messages[0].content}`);
+          console.log('To change it, type: /system <new prompt>\n');
+        } else {
+          const newPrompt = args.join(' ');
+          messages[0].content = newPrompt;
+          console.log(`\x1b[32mSystem prompt updated.\x1b[0m\n`);
+        }
+        continue;
+      } else if (cmd === 'save') {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = `chat-${timestamp}.md`;
+        const content = messages.map(m => `### ${m.role.toUpperCase()}\n${m.content}\n`).join('\n');
+        fs.writeFileSync(fileName, content);
+        console.log(`\x1b[32mChat saved to ${fileName}\x1b[0m\n`);
+        continue;
+      } else if (cmd === 'clear') {
+        messages.splice(1);
+        console.log('\x1b[33mChat history cleared.\x1b[0m\n');
+        continue;
+      } else if (cmd === 'help' || cmd === '') {
+        console.log('\n\x1b[35mCommands:\x1b[0m');
+        console.log('/model  - List or switch models');
+        console.log('/system - View or change assistant persona');
+        console.log('/save   - Save chat history to a .md file');
+        console.log('/clear  - Clear chat history');
+        console.log('/help   - Show this message');
+        console.log('/exit   - Close the application\n');
+        continue;
+      } else if (cmd === 'exit' || cmd === 'quit') {
+        console.log('\x1b[32mGoodbye!\x1b[0m');
+        break;
+      } else {
+        console.log(`\x1b[31mUnknown command: /${cmd}. Type /help for options.\x1b[0m\n`);
+        continue;
+      }
+    }
+
+    messages.push({ role: 'user', content: trimmedInput });
 
     try {
       process.stdout.write('\x1b[33mGroq: \x1b[0m');
@@ -60,7 +134,7 @@ async function chat() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
+          model: currentModel,
           messages: messages,
           stream: true
         })
