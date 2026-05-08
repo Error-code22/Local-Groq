@@ -4,9 +4,11 @@ import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const HISTORY_PATH = path.join(__dirname, 'history.json');
 
 // Load .env file manually to avoid dependencies
 const envPath = path.join(__dirname, '.env');
@@ -39,12 +41,125 @@ const AVAILABLE_MODELS = [
 
 let currentModel = AVAILABLE_MODELS[0];
 
-const messages = [
-  { role: 'system', content: 'You are a helpful assistant running in a local CLI.' }
+const DEFAULT_SYSTEM_PROMPT = 'You are a helpful Local CLI Agent with access to the user\'s filesystem. You provide technical assistance and can explore local files to help the user. Use tools whenever you need to see what files are present or read their contents.';
+
+let messages = [
+  { role: 'system', content: DEFAULT_SYSTEM_PROMPT }
 ];
 
-console.log('\x1b[32m--- Groq CLI Terminal Started ---\x1b[0m');
+// Load History
+if (fs.existsSync(HISTORY_PATH)) {
+  try {
+    const savedHistory = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8'));
+    if (Array.isArray(savedHistory)) {
+      messages = savedHistory;
+    }
+  } catch (e) {
+    console.log('\x1b[33mWarning: Could not load history.json. Starting fresh.\x1b[0m');
+  }
+}
+
+function saveHistory() {
+  fs.writeFileSync(HISTORY_PATH, JSON.stringify(messages, null, 2));
+}
+
+// Tool Definitions
+const tools = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_files',
+      description: 'Lists files and directories in a given path.',
+      parameters: {
+        type: 'object',
+        properties: {
+          directory: {
+            type: 'string',
+            description: 'The directory to list (defaults to current directory ".").'
+          }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Reads the contents of a file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          file_path: {
+            type: 'string',
+            description: 'The path to the file to read.'
+          }
+        },
+        required: ['file_path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_os_info',
+      description: 'Gets basic information about the current operating system.',
+      parameters: { type: 'object', properties: {} }
+    }
+  }
+];
+
+// Tool Implementation
+const toolHandlers = {
+  list_files: ({ directory = '.' }) => {
+    try {
+      const files = fs.readdirSync(directory);
+      return JSON.stringify(files);
+    } catch (e) {
+      return `Error listing files: ${e.message}`;
+    }
+  },
+  read_file: ({ file_path }) => {
+    try {
+      return fs.readFileSync(file_path, 'utf8');
+    } catch (e) {
+      return `Error reading file: ${e.message}`;
+    }
+  },
+  get_os_info: () => {
+    return JSON.stringify({
+      platform: os.platform(),
+      release: os.release(),
+      type: os.type(),
+      arch: os.arch()
+    });
+  }
+};
+
+console.log('\x1b[32m--- Groq CLI Agent Started ---\x1b[0m');
 console.log('Type \x1b[35m/\x1b[0m for commands, or "exit" to end.');
+
+async function callGroq(msgs) {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: currentModel,
+      messages: msgs,
+      tools: tools,
+      tool_choice: 'auto'
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.error?.message || 'Unknown error');
+  }
+
+  return await response.json();
+}
 
 async function chat() {
   while (true) {
@@ -90,6 +205,7 @@ async function chat() {
         } else {
           const newPrompt = args.join(' ');
           messages[0].content = newPrompt;
+          saveHistory();
           console.log(`\x1b[32mSystem prompt updated.\x1b[0m\n`);
         }
         continue;
@@ -100,16 +216,17 @@ async function chat() {
         fs.writeFileSync(fileName, content);
         console.log(`\x1b[32mChat saved to ${fileName}\x1b[0m\n`);
         continue;
-      } else if (cmd === 'clear') {
-        messages.splice(1);
-        console.log('\x1b[33mChat history cleared.\x1b[0m\n');
+      } else if (cmd === 'clear' || cmd === 'reset') {
+        messages = [{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }];
+        if (fs.existsSync(HISTORY_PATH)) fs.unlinkSync(HISTORY_PATH);
+        console.log('\x1b[33mChat memory reset.\x1b[0m\n');
         continue;
       } else if (cmd === 'help' || cmd === '') {
         console.log('\n\x1b[35mCommands:\x1b[0m');
         console.log('/model  - List or switch models');
         console.log('/system - View or change assistant persona');
         console.log('/save   - Save chat history to a .md file');
-        console.log('/clear  - Clear chat history');
+        console.log('/reset  - Wipe all memory and history');
         console.log('/help   - Show this message');
         console.log('/exit   - Close the application\n');
         continue;
@@ -127,54 +244,36 @@ async function chat() {
     try {
       process.stdout.write('\x1b[33mGroq: \x1b[0m');
       
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: currentModel,
-          messages: messages,
-          stream: true
-        })
-      });
+      let finalResponse = '';
+      let currentCall = await callGroq(messages);
 
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error?.message || 'Unknown error');
-      }
+      while (currentCall.choices[0].message.tool_calls) {
+        const toolCalls = currentCall.choices[0].message.tool_calls;
+        messages.push(currentCall.choices[0].message);
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let fullContent = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6);
-            if (dataStr === '[DONE]') break;
-
-            try {
-              const data = JSON.parse(dataStr);
-              const content = data.choices[0]?.delta?.content || '';
-              process.stdout.write(content);
-              fullContent += content;
-            } catch (e) {
-              // Ignore parse errors for incomplete chunks
-            }
-          }
+        for (const toolCall of toolCalls) {
+          const functionName = toolCall.function.name;
+          const functionArgs = JSON.parse(toolCall.function.arguments);
+          
+          process.stdout.write(`\n\x1b[30;43m Executing ${functionName}... \x1b[0m `);
+          
+          const result = toolHandlers[functionName](functionArgs);
+          
+          messages.push({
+            tool_call_id: toolCall.id,
+            role: 'tool',
+            name: functionName,
+            content: result
+          });
         }
+        
+        currentCall = await callGroq(messages);
       }
 
-      process.stdout.write('\n');
-      messages.push({ role: 'assistant', content: fullContent });
+      finalResponse = currentCall.choices[0].message.content;
+      console.log(finalResponse);
+      messages.push({ role: 'assistant', content: finalResponse });
+      saveHistory();
 
     } catch (error) {
       console.error(`\n\x1b[31mError: ${error.message}\x1b[0m`);

@@ -1,49 +1,51 @@
-# Groq CLI
+# Groq CLI Agent
 
-A lightweight, streaming CLI interface for interacting with Groq's Llama-3 models.
+A powerful, zero-dependency CLI agent that can interact with your local files and remember your conversations.
 
 ## Features
 
-- **Real-time Streaming:** See responses as they are generated.
-- **Persistent Context:** Remembers the conversation during the session.
-- **Easy Setup:** Use a `.env` file for API key management.
+- **File System Awareness:** The AI can list files and read their contents to help you with your code or documents.
+- **Persistent Memory:** Automatically saves chat history to `history.json` so you can pick up where you left off.
+- **Dynamic Tool Calling:** Uses Groq's function calling to interact with your local environment.
+- **Command System:** Rich set of commands for managing models, system prompts, and history.
 - **Windows Friendly:** Includes a `.cmd` wrapper for easy launching.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18 or higher recommended)
+- [Node.js](https://nodejs.org/) (v18 or higher)
 - A Groq API Key (get one at [console.groq.com](https://console.groq.com/keys))
 
 ## Installation & Setup
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/local-groq.git
-   cd local-groq
+   git clone https://github.com/Error-code22/Local-Groq.git
+   cd Local-Groq
    ```
 
 2. **Configure your API Key:**
-   - Create a file named `.env` in the root directory.
-   - Copy the contents of `.env.example` into `.env`.
-   - Replace `your_key_here` with your actual Groq API key.
-
-   ```text
-   GROQ_API_KEY=gsk_...
-   ```
+   - Create a file named `.env`.
+   - Add your key: `GROQ_API_KEY=gsk_...`
 
 ## Usage
 
-### Windows
 Double-click `local-groq.cmd` or run:
 ```bash
 .\local-groq.cmd
 ```
 
-### Linux / macOS
-```bash
-chmod +x local-groq.mjs
-node local-groq.mjs
-```
+### Commands
+- `/model` - Switch between Llama-3, Mixtral, etc.
+- `/system` - Change the AI's personality/instructions.
+- `/save` - Export current chat to a Markdown file.
+- `/reset` - Wipe all history and start a fresh session.
+- `/help` - Show all commands.
+
+### Agent Capabilities
+You can ask the AI things like:
+- "What files are in this folder?"
+- "Read the content of package.json and explain it."
+- "Help me debug the code in local-groq.mjs."
 
 ## License
 MIT
